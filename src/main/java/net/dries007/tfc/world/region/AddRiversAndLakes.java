@@ -6,23 +6,19 @@
 
 package net.dries007.tfc.world.region;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
-import org.jetbrains.annotations.Nullable;
+import java.util.function.Function;
 
-import net.dries007.tfc.world.layer.TFCLayers;
+import net.dries007.tfc.world.river.RegionRiverContext;
+import net.minecraft.util.RandomSource;
+
 import net.dries007.tfc.world.river.River;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 public enum AddRiversAndLakes implements RegionTask
 {
     INSTANCE;
-
-    public static final float RIVER_LENGTH = 2.7f;
-    public static final int RIVER_DEPTH = 17;
-    public static final float RIVER_FEATHER = 0.8f;
 
     @Override
     public void apply(RegionGenerator.Context context)
@@ -30,135 +26,80 @@ public enum AddRiversAndLakes implements RegionTask
         final Region region = context.region;
         final RandomSource random = context.random;
 
-        final RegionRiverGenerator riverGenerator = new RegionRiverGenerator(region);
 
-        createInitialDrains(context, region, riverGenerator);
+       final RegionRiverContext riverGenerator = new RegionRiverContext(region, random);
 
-        final List<RiverEdge> rivers = riverGenerator.build(e -> new RiverEdge(e, random));
+
+        final List<RiverEdge> rivers = riverGenerator.getRiverEdges();
 
         context.region.setRivers(rivers);
         if (!rivers.isEmpty())
         {
-            annotateRiverGridScale(region, random, rivers);
+           annotateRiverGridScale(region, rivers);
+            annotateLakesGridScale(region, riverGenerator.getLakes());
         }
     }
 
-    private void createInitialDrains(RegionGenerator.Context context, Region region, RegionRiverGenerator riverGenerator)
+    private void annotateRiverGridScale(Region region, List<RiverEdge> rivers)
     {
-        for (final var point : region.points())
-        {
-            if (point.shore())
+        for (RiverEdge edge : rivers) {
+            if (edge.width > RiverEdge.MIN_VALLEY_WIDTH)
             {
-                // Mark as a possible river source
-                float bestAngle = findBestStartingAngle(region, context.random, point.index);
-                if (!Float.isNaN(bestAngle))
-                {
-                    final XoroshiroRandomSource rng = new XoroshiroRandomSource(context.random.nextLong());
-                    riverGenerator.add(new River.Builder(rng, point.x + 0.5f, point.z + 0.5f, bestAngle, RIVER_LENGTH, RIVER_DEPTH, RIVER_FEATHER));
-                }
+               annotateRiverGridScale(region, edge);
             }
         }
     }
 
-    private float findBestStartingAngle(Region region, RandomSource random, int index)
+    private float void annotateLakesGridScale(Region region, List<River.Lake> lakes)
     {
-        // Iterate to find the most likely (projected) river direction to start out
-        // Selects the best angle, out of eight choices, and if there are multiple ideal choices, will select uniformly
-        // Then, applies a slight variance on the chosen angle, so rivers don't start at exact pi/4 increments, as the river builder will respect the starting angle exactly.
-        float bestDistanceMetric = Float.MIN_VALUE;
-        int bestDistanceCount = 0;
-        float bestAngle = Float.NaN;
+        if (!River.Constants.LAKE_GENERATION_ENABLED) {
+            return;
+        }
+        for (River.Lake lake : lakes) {
+            int gridX = (int) lake.center().toGridAligned().x();
+            int gridZ = (int) lake.center().toGridAligned().y();
 
-        for (int dirX = -1; dirX <= 1; dirX++)
-        {
-            for (int dirZ = -1; dirZ <= 1; dirZ++)
-            {
-                if (dirX == 0 && dirZ == 0) continue;
-
-                final @Nullable Region.Point dirPoint = region.atOffset(index, 4 * dirX, 4 * dirZ);
-                if (dirPoint != null && dirPoint.land())
-                {
-                    final float dirDistanceMetric = dirPoint.distanceToOcean - Math.abs(dirX) - Math.abs(dirZ);
-                    if (dirDistanceMetric > bestDistanceMetric || (dirDistanceMetric == bestDistanceMetric && random.nextInt(1 + bestDistanceCount) == 0))
-                    {
-                        if (dirDistanceMetric > bestDistanceMetric)
-                        {
-                            bestDistanceMetric = dirDistanceMetric;
-                            bestDistanceCount = 0;
-                        }
-                        bestDistanceCount += 1;
-                        bestAngle = (float) Math.atan2(dirZ, dirX);
+            int minOffset = (int) Math.ceil((lake.lakeSize() - 1) / 2.);
+            int maxOffset = (int) Math.floor((lake.lakeSize() - 1) / 2.);
+            for (int offsetX = -minOffset; offsetX <= maxOffset; offsetX++) {
+                for (int offsetZ = -minOffset; offsetZ <= maxOffset; offsetZ++) {
+                    if (lake.endorheic()) {
+                        placeEndorheicLakeAt(region, gridX + offsetX, gridZ + offsetZ);
+                    } else {
+                        placeLakeAt(region, gridX + offsetX, gridZ + offsetZ);
                     }
                 }
             }
         }
-        if (!Float.isNaN(bestAngle))
-        {
-            bestAngle += random.nextFloat() * 0.2f - 0.1f; // The rough area covered by each angle is pi/4 ~ 0.75, this gives each angle some wiggle room, but still directs it in the general vicinity of the target angle.
-        }
-
-        return bestAngle;
+        
     }
+    private void placeEndorheicLakeAt(Region region, int gridX, int gridZ) {
+        final Region.Point point = region.at(gridX, gridZ);
 
-    private void annotateRiverGridScale(Region region, RandomSource random, List<RiverEdge> rivers)
-    {
-        // Build a map of each source vertex to the downstream edge.
-        // Use this to populate the source -> drain linked list, so we can traverse down each branch
-        final Map<River.Vertex, RiverEdge> sourceVertexToEdge = new HashMap<>();
-        for (RiverEdge edge : rivers)
-        {
-            sourceVertexToEdge.put(edge.source(), edge);
-        }
+ if (point != null) {
+            point.setLake();
+            point.setEndorheicLake();
+        private void placeLakeAt(Region region, int gridX, int gridZ) {
+        final Region.Point point = region.at(gridX, gridZ);
 
-        for (RiverEdge edge : rivers)
-        {
-            edge.linkToDrain(sourceVertexToEdge.get(edge.drain()));
-        }
-
-        // Iterate downstream from each global source edge, and increment width as we go downstream.
-        for (RiverEdge edge : rivers)
-        {
-            if (!edge.sourceEdge())
-            {
-                int width = RiverEdge.MIN_WIDTH;
-                while (edge != null)
-                {
-                    edge.width = Math.max(edge.width, width);
-                    edge = edge.drainEdge();
-                    width = Math.min(width + 2, RiverEdge.MAX_WIDTH);
-                }
-            }
-        }
-
-        // Place lakes around the source of rivers.
-        for (RiverEdge edge : rivers)
-        {
-            if (!edge.sourceEdge() && random.nextInt(3) == 0)
-            {
-                // Try and place a lake near this source
-                placeLakeNear(region, edge, 1, 1);
-                placeLakeNear(region, edge, -1, 1);
-                placeLakeNear(region, edge, 1, -1);
-                placeLakeNear(region, edge, -1, -1);
-            }
-            else if (edge.width > RiverEdge.MIN_VALLEY_WIDTH)
-            {
-                annotateRiverGridScale(region, edge);
-            }
+         if (point != null) {
+            point.setLake();
+            point.rainfall += 0.09f * (500f - point.rainfall); // Small, localized rainfall increase around lakes of ~45mm max
         }
     }
 
     private void annotateRiverGridScale(Region region, RiverEdge edge)
     {
-        final int ux = (int) (edge.source().x());
-        final int uy = (int) (edge.source().y());
-        final int vx = (int) (edge.drain().x());
-        final int vy = (int) (edge.drain().y());
-        int dx = vx - ux;
-        int dy = vy - uy;
-        final double mag = Math.sqrt(dx * dx + dy * dy);
-        final double unitX = (double) dx / mag;
-        final double unitY = (double) dy / mag;
+      // todo make size dependent on river width
+        final double ux = edge.source().x();
+        final double uy = edge.source().y();
+        final double vx = edge.drain().x();
+        final double vy = edge.drain().y();
+        double dx = vx - ux;
+        double dy = vy - uy;
+        final double mag = Math.sqrt(dx * dx + dy * dy) + 1;
+        final double unitX = dx / mag;
+        final double unitY = dy / mag;
 
         double i = 0;
         while (i <= mag)
@@ -167,59 +108,21 @@ public enum AddRiversAndLakes implements RegionTask
             int y = (int) (uy + unitY * i);
             setRiver(region.at(x, y));
             setRiver(region.at(x + 1, y));
+            setRiver(region.at(x - 1, y));
             setRiver(region.at(x, y + 1));
-            setRiver(region.at(x + 1, y + 1));
+            setRiver(region.at(x, y - 1));
             i = i + 1;
         }
     }
 
     private void setRiver(@Nullable Region.Point point)
     {
-        if (point != null && point.land())
+      if (point != null && (point.land() || point.shore()))
         {
             point.setRiver();
             point.rainfall += 0.09f * (500f - point.rainfall); // Small, localized rainfall increase around river valleys of ~45mm max
         }
     }
 
-    private void placeLakeNear(Region region, RiverEdge edge, int offsetX, int offsetZ)
-    {
-        final int gridX = (int) (edge.source().x() + 0.3f * offsetX);
-        final int gridZ = (int) (edge.source().y() + 0.3f * offsetZ);
-
-        final Region.Point point = region.at(gridX, gridZ);
-        if (point != null && point.land() && point.distanceToOcean >= 2 && point.distanceToEdge >= 2)
-        {
-            point.setLake();
-            point.rainfall += 0.09f * (500f - point.rainfall); // Small, localized rainfall increase around lakes of ~45mm max
-        }
-    }
-
-    static class RegionRiverGenerator extends River.MultiParallelBuilder
-    {
-        private final Region region;
-
-        RegionRiverGenerator(Region region)
-        {
-            this.region = region;
-        }
-
-        @Override
-        protected boolean isLegal(River.Vertex prev, River.Vertex vertex)
-        {
-            final Region.Point prevPoint = vertex2Point(prev), newPoint = vertex2Point(vertex);
-            return newPoint != null && prevPoint != null
-                && newPoint.land() // River must be on land
-                && newPoint.distanceToOcean >= prevPoint.distanceToOcean // Further from the ocean or equal than the previous point
-                && newPoint.distanceToOcean >= Math.min(3, prev.distance() / 2); // And it should gradually work it's way inland
-        }
-
-        @Nullable
-        private Region.Point vertex2Point(River.Vertex vertex)
-        {
-            final int gridX = (int) Math.round(vertex.x());
-            final int gridZ = (int) Math.round(vertex.y());
-            return region.at(gridX, gridZ);
-        }
-    }
+   
 }

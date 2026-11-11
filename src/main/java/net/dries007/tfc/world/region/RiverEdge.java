@@ -17,13 +17,14 @@ import net.dries007.tfc.world.river.RiverHelpers;
 
 public final class RiverEdge
 {
-    public static final int MIN_WIDTH = 8;
-    public static final int MAX_WIDTH = 24;
-    public static final int MIN_VALLEY_WIDTH = 20;
+    public static final int MIN_WIDTH = 2;
+    public static final int MAX_WIDTH = 100;
+    public static final int MIN_VALLEY_WIDTH = 30;
 
-    private static final int MAX_AFFECTING_GRID_DISTANCE = 1 + Mth.ceil(1.5f * AddRiversAndLakes.RIVER_LENGTH);
+    private static final int MAX_AFFECTING_GRID_DISTANCE = 1 + Mth.ceil(1.5f * River.Constants.INITIAL_RIVER_EDGE_LENGTH);
 
     public int width;
+    public float waterflowTotal;
 
     private final River.Vertex source, drain;
     private final MidpointFractal fractal;
@@ -35,10 +36,12 @@ public final class RiverEdge
     private @Nullable RiverEdge drainEdge; // The drain edge of this river
 
     public RiverEdge(River.Edge edge, RandomSource random)
-    {
+    {   
+        this.waterflowTotal = edge.waterflowTotal;
+        this.width = waterflowToWidth(waterflowTotal);
         this.source = edge.source();
         this.drain = edge.drain();
-        this.fractal = edge.fractal(random, 4);
+        this.fractal = edge.fractal(random, getFractalBisections());
 
         final int centerGridX = (int) Math.round(0.5f * (edge.source().x() + edge.drain().x()));
         final int centerGridZ = (int) Math.round(0.5f * (edge.source().y() + edge.drain().y()));
@@ -119,3 +122,23 @@ public final class RiverEdge
         }
     }
 }
+
+    private static int waterflowToWidth(float waterflow) {
+        return Math.max(
+            MIN_WIDTH,
+            Math.min(
+                MAX_WIDTH,
+                (int) Math.ceil(Math.pow(waterflow, 0.65) / 300)));
+    }
+
+    private int getFractalBisections() {
+        if (River.Constants.DEBUG_STRAIGHT_RIVER_EDGES) {
+            return 0;
+        }
+
+        return (int) Math.min(9, getLength() * 4.5 - (1.5 * width / MAX_WIDTH));
+    }
+
+    private double getLength() {
+        return RiverHelpers.distanceVertex(source, drain);
+    }

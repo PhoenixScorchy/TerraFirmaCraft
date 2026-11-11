@@ -234,7 +234,7 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
 
                 double aquiferSurfaceHeight = biome.getAquiferSurfaceHeight(sampler, actualX, actualZ);
 
-                if (biome.hasRivers() && aquiferSurfaceHeight > seaLevel - 24 && sampleRiverDistSq(actualX, actualZ) < 15 * 15)
+                if (biome.hasRivers() && aquiferSurfaceHeight > seaLevel - 24 && sampleIsRiver(actualX, actualZ))
                 {
                     // When near a river, force aquifers below the river in a wide radius (15 blocks)
                     aquiferSurfaceHeight = seaLevel - 24;
@@ -734,11 +734,12 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
         }
     }
 
-    private double sampleRiverDistSq(int blockX, int blockZ)
+    private boolean sampleIsRiver(int blockX, int blockZ)
     {
         final RegionPartition.Point point = biomeSource.getPartition(blockX, blockZ);
 
-        double minDist = Float.MAX_VALUE;
+        double minDistSq = Float.MAX_VALUE;
+        RiverEdge minEdge = null;
 
         double exactGridX = Units.blockToGridExact(blockX);
         double exactGridZ = Units.blockToGridExact(blockZ);
@@ -746,16 +747,16 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
         for (RiverEdge edge : point.rivers())
         {
             final MidpointFractal fractal = edge.fractal();
-            if (fractal.maybeIntersect(exactGridX, exactGridZ, minDist))
+            if (fractal.maybeIntersect(exactGridX, exactGridZ, minDistSq))
             {
-                double dist = fractal.intersectDistance(exactGridX, exactGridZ);
-                if (dist < minDist)
+                double distSq = fractal.intersectDistance(exactGridX, exactGridZ);
+                if (distSq < minDistSq)
                 {
-                    minDist = dist;
+                    minDistSq = distSq;
                 }
             }
         }
-        return minDist * Units.GRID_WIDTH_IN_BLOCK * Units.GRID_WIDTH_IN_BLOCK;
+        return minEdge != null && minDistSq * Units.GRID_WIDTH_IN_BLOCK * <= minEdge.width * minEdge.width;
     }
 
     private Flow calculateFlowAt(int cellX, int cellZ)
