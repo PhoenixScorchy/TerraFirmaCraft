@@ -19,9 +19,9 @@ val jeiVersion: String = "19.25.0.321"
 val patchouliVersion: String = "1.21.1-92-NEOFORGE"
 
 val modId: String = "tfc"
-val modVersion: String = System.getenv("VERSION") ?: "4.2.15 [release]"
+val modVersion: String = System.getenv("VERSION") ?: "4.2.15"
 val modJavaVersion: String = "21"
-val modIsInCI: Boolean = !modVersion.contains("-indev")
+val modIsInCI: Boolean = !modVersion.contains("")
 val modDataOutput: String = "src/generated/resources"
 
 
