@@ -50,7 +50,7 @@ public enum AddRiversAndLakes implements RegionTask
         }
     }
 
-    private float void annotateLakesGridScale(Region region, List<River.Lake> lakes)
+    private void annotateLakesGridScale(Region region, List<River.Lake> lakes)
     {
         if (!River.Constants.LAKE_GENERATION_ENABLED) {
             return;
@@ -76,10 +76,13 @@ public enum AddRiversAndLakes implements RegionTask
     private void placeEndorheicLakeAt(Region region, int gridX, int gridZ) {
         final Region.Point point = region.at(gridX, gridZ);
 
- if (point != null) {
+        if (point != null) {
             point.setLake();
             point.setEndorheicLake();
-        private void placeLakeAt(Region region, int gridX, int gridZ) {
+        }
+    }
+
+    private void placeLakeAt(Region region, int gridX, int gridZ) {
         final Region.Point point = region.at(gridX, gridZ);
 
          if (point != null) {

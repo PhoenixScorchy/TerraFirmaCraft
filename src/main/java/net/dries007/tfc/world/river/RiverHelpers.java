@@ -91,7 +91,6 @@ public final class RiverHelpers
     {
         return f >= 0 ? (int) f : (int) f - 1;
     }
-}
 
     /**
      * @return The shortest square distance between a point {@code vertex} and the line segment {@code edge}
@@ -143,3 +142,4 @@ public final class RiverHelpers
         }
         return value > 0 ? 1 : 2;
     }
+}

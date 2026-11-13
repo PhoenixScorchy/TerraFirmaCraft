@@ -208,8 +208,11 @@ public class ChunkHeightFiller
 
         final double preVolcanicHeight = height;
 
-        // Centered features (volcanoes) are last to override rivers and beaches
-        height = adjustHeightForVolcanic(height);
+        // Rivers override centered volcanic features so volcanoes never block a river channel
+        if (info == null || preVolcanicHeight >= seaLevel || info.normDistSq() >= 1.25)
+        {
+            height = adjustHeightForVolcanic(height);
+        }
 
         // The minimum depth below the surface that noise (excluding river noise) should not be allowed to carve
         // Typically 0, allowing carving anywhere, but where centered noise features (volcanoes) elevate the terrain the surface is guaranteed to be intact to some depth
@@ -296,22 +299,36 @@ public class ChunkHeightFiller
         {
             // Iterate through blend types, and sample once
             // Each sampler gets the original terrain height, modifies it, and is interpolated together
-            double riverBlendHeight = 0d;
+            double activeRiverBlendHeight = 0d;
+            double activeRiverWeight = 0d;
             for (RiverBlendType type : RiverBlendType.ALL)
             {
                 final double weight = riverBlendWeights[type.ordinal()];
-                final RiverNoiseSampler sampler = riverNoiseSamplers.get(type);
-                if (type == RiverBlendType.NONE)
+                if (type != RiverBlendType.NONE && weight > 0)
                 {
-                    riverBlendHeight += weight * height;
-                }
-                else if (weight > 0)
-                {
+                    final RiverNoiseSampler sampler = riverNoiseSamplers.get(type);
                     final double riverHeight = sampler.setColumnAndSampleHeight(info, blockX, blockZ, height, weight);
-                    riverBlendHeight += weight * riverHeight;
+                    activeRiverBlendHeight += weight * riverHeight;
+                    activeRiverWeight += weight;
                 }
             }
-            return riverBlendHeight;
+
+            final double noneWeight = riverBlendWeights[RIVER_TYPE_NONE];
+            if (activeRiverWeight > 0)
+            {
+                final double activeAvg = activeRiverBlendHeight / activeRiverWeight;
+                // Do not let non-river biomes raise a carved river channel above sea level to form a wall across the river
+                final double effectiveNoneHeight = (info.normDistSq() <= 1.25 && activeAvg < seaLevel)
+                    ? Math.min(height, seaLevel - 1)
+                    : height;
+                return activeRiverBlendHeight + noneWeight * effectiveNoneHeight;
+            }
+            else if (info.normDistSq() <= 1.0 && height >= seaLevel)
+            {
+                // Even if all local biomes have RiverBlendType.NONE, carve a continuous channel rather than leaving a wall
+                return riverNoiseSamplers.get(RiverBlendType.CANYON).setColumnAndSampleHeight(info, blockX, blockZ, height, 1.0);
+            }
+            return height;
         }
         else
         {
@@ -358,7 +375,8 @@ public class ChunkHeightFiller
         for (RiverEdge edge : point.rivers())
         {
             final MidpointFractal fractal = edge.fractal();
-            if (fractal.maybeIntersect(exactGridX, exactGridZ, minDist))
+            final double maxCheckDist = minEdge == null ? limitDistInGrid : Math.min(limitDistInGrid, Math.sqrt(minDistAdjusted * edge.widthSq()));
+            if (fractal.maybeIntersect(exactGridX, exactGridZ, maxCheckDist))
             {
                 // Minimum by square distance would get us the closest edge, but would fail in the case some edges are wider than others
                 // Since in most situations, we're actually concerned about distance / width, we want to have the one with the highest weight in that respect.

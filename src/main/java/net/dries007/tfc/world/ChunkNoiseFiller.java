@@ -234,10 +234,10 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
 
                 double aquiferSurfaceHeight = biome.getAquiferSurfaceHeight(sampler, actualX, actualZ);
 
-                if (biome.hasRivers() && aquiferSurfaceHeight > seaLevel - 24 && sampleIsRiver(actualX, actualZ))
+                if (aquiferSurfaceHeight > seaLevel - 56 && sampleIsRiver(actualX, actualZ))
                 {
-                    // When near a river, force aquifers below the river in a wide radius (15 blocks)
-                    aquiferSurfaceHeight = seaLevel - 24;
+                    // When near a river, force aquifers below the deepest river bed in a wide radius (20 blocks)
+                    aquiferSurfaceHeight = seaLevel - 56;
                 }
 
                 if (aquiferSurfaceHeight > seaLevel)
@@ -554,6 +554,13 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
      */
     private double calculateNoiseAtHeight(int y, double heightNoiseValue, int surfaceIntegrityDepth)
     {
+        final RiverInfo info = riverData[localX + 16 * localZ];
+        if (info != null && heightNoiseValue < seaLevel && y > heightNoiseValue)
+        {
+            // Force complete carving above the riverbed in surface river channels regardless of biome/volcano weights
+            return -1;
+        }
+
         double noise = 0;
         for (Object2DoubleMap.Entry<BiomeNoiseSampler> entry : columnBiomeNoiseSamplers.object2DoubleEntrySet())
         {
@@ -623,20 +630,50 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
      */
     private BlockState calculateBlockStateAtNoise(int y, double terrainNoise)
     {
-        double terrainAndCaveNoise = terrainNoise;
-        if (noodleToggle.sample() >= 0)
-        {
-            final double thickness = Mth.clampedMap(noodleThickness.sample(), -1, 1, 0.05, 0.1);
-            final double ridgeA = Math.abs(1.5 * noodleRidgeA.sample()) - thickness;
-            final double ridgeB = Math.abs(1.5 * noodleRidgeB.sample()) - thickness;
-            final double ridge = Math.max(ridgeA, ridgeB);
+        final int localIndex = localX + 16 * localZ;
+        final RiverInfo info = riverData[localIndex];
+        final int bedHeight = surfaceHeight[localIndex];
+        final boolean inRiverChannel = info != null && bedHeight < seaLevel;
 
-            terrainAndCaveNoise = Math.min(terrainAndCaveNoise, ridge);
+        if (inRiverChannel && y > bedHeight)
+        {
+            // River carving strictly overrides aquifers, caves, and terrain walls:
+            // solid water below sea level (zero air blocks), open air at/above sea level (zero roofs/walls)
+            return y < seaLevel
+                ? baseBlockSource.modifyFluid(Blocks.WATER.defaultBlockState(), blockX, blockZ)
+                : Blocks.AIR.defaultBlockState();
         }
 
-        terrainAndCaveNoise = Math.min(terrainAndCaveNoise, noiseCaves.sample());
+        final boolean nearRiverBankOrBed = info != null && y < seaLevel
+            && ((inRiverChannel && y >= bedHeight - 6) || (info.normDistSq() <= 1.25 && y >= bedHeight - 4));
+
+        double terrainAndCaveNoise = terrainNoise;
+        if (!nearRiverBankOrBed)
+        {
+            if (noodleToggle.sample() >= 0)
+            {
+                final double thickness = Mth.clampedMap(noodleThickness.sample(), -1, 1, 0.05, 0.1);
+                final double ridgeA = Math.abs(1.5 * noodleRidgeA.sample()) - thickness;
+                final double ridgeB = Math.abs(1.5 * noodleRidgeB.sample()) - thickness;
+                final double ridge = Math.max(ridgeA, ridgeB);
+
+                terrainAndCaveNoise = Math.min(terrainAndCaveNoise, ridge);
+            }
+
+            terrainAndCaveNoise = Math.min(terrainAndCaveNoise, noiseCaves.sample());
+        }
         mutableDensityFunctionContext.cursor().set(blockX, y, blockZ);
         terrainAndCaveNoise += beardifier.compute(mutableDensityFunctionContext);
+
+        if (nearRiverBankOrBed)
+        {
+            // Prevent dry aquifers or pressure walls from opening air pockets in the riverbed or submerged riverbanks
+            if (terrainAndCaveNoise <= 0)
+            {
+                return baseBlockSource.modifyFluid(Blocks.WATER.defaultBlockState(), blockX, blockZ);
+            }
+            return baseBlockSource.getBaseBlock(blockX, y, blockZ);
+        }
 
         final BlockState aquiferState = aquifer.sampleState(blockX, y, blockZ, terrainAndCaveNoise);
         if (aquiferState != null)
@@ -726,7 +763,7 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
                 else
                 {
                     setupColumn(chunkMinX + localX, chunkMinZ + localZ);
-                    info = sampleRiverEdge(point);
+                    info = sampleRiverEdge(biomeSource.getPartition(chunkMinX + localX, chunkMinZ + localZ));
                 }
 
                 riverFlows[quartX + 5 * quartZ] = info != null && info.normDistSq() < 0.28 ? info.flow() : Flow.NONE;
@@ -738,25 +775,23 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
     {
         final RegionPartition.Point point = biomeSource.getPartition(blockX, blockZ);
 
-        double minDistSq = Float.MAX_VALUE;
-        RiverEdge minEdge = null;
-
-        double exactGridX = Units.blockToGridExact(blockX);
-        double exactGridZ = Units.blockToGridExact(blockZ);
+        final double exactGridX = Units.blockToGridExact(blockX);
+        final double exactGridZ = Units.blockToGridExact(blockZ);
 
         for (RiverEdge edge : point.rivers())
         {
+            final double radiusGrid = Units.blockToGridExact(edge.width + 20);
             final MidpointFractal fractal = edge.fractal();
-            if (fractal.maybeIntersect(exactGridX, exactGridZ, minDistSq))
+            if (fractal.maybeIntersect(exactGridX, exactGridZ, radiusGrid))
             {
-                double distSq = fractal.intersectDistance(exactGridX, exactGridZ);
-                if (distSq < minDistSq)
+                final double distSq = fractal.intersectDistance(exactGridX, exactGridZ);
+                if (distSq <= radiusGrid * radiusGrid)
                 {
-                    minDistSq = distSq;
+                    return true;
                 }
             }
         }
-        return minEdge != null && minDistSq * Units.GRID_WIDTH_IN_BLOCK * <= minEdge.width * minEdge.width;
+        return false;
     }
 
     private Flow calculateFlowAt(int cellX, int cellZ)

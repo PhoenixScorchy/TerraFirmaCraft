@@ -43,13 +43,15 @@ public final class RiverEdge
         this.drain = edge.drain();
         this.fractal = edge.fractal(random, getFractalBisections());
 
-        final int centerGridX = (int) Math.round(0.5f * (edge.source().x() + edge.drain().x()));
-        final int centerGridZ = (int) Math.round(0.5f * (edge.source().y() + edge.drain().y()));
+        final int minEdgeGridX = Mth.floor(Math.min(edge.source().x(), edge.drain().x()));
+        final int maxEdgeGridX = Mth.ceil(Math.max(edge.source().x(), edge.drain().x()));
+        final int minEdgeGridZ = Mth.floor(Math.min(edge.source().y(), edge.drain().y()));
+        final int maxEdgeGridZ = Mth.ceil(Math.max(edge.source().y(), edge.drain().y()));
 
-        this.minPartX = Units.gridToPart(centerGridX - MAX_AFFECTING_GRID_DISTANCE);
-        this.minPartZ = Units.gridToPart(centerGridZ - MAX_AFFECTING_GRID_DISTANCE);
-        this.maxPartX = Units.gridToPart(centerGridX + MAX_AFFECTING_GRID_DISTANCE);
-        this.maxPartZ = Units.gridToPart(centerGridZ + MAX_AFFECTING_GRID_DISTANCE);
+        this.minPartX = Units.gridToPart(minEdgeGridX - MAX_AFFECTING_GRID_DISTANCE);
+        this.minPartZ = Units.gridToPart(minEdgeGridZ - MAX_AFFECTING_GRID_DISTANCE);
+        this.maxPartX = Units.gridToPart(maxEdgeGridX + MAX_AFFECTING_GRID_DISTANCE);
+        this.maxPartZ = Units.gridToPart(maxEdgeGridZ + MAX_AFFECTING_GRID_DISTANCE);
 
         this.sourceEdge = false;
         this.drainEdge = null;
@@ -101,7 +103,7 @@ public final class RiverEdge
         // This is not exactly correct, since the interpolation will be based on
         final double lerpFac = RiverHelpers.projectAlongLine(
             source().x(), source().y(),
-            drain().y(), drain().y(),
+            drain().x(), drain().y(),
             exactGridX, exactGridZ
         );
 
@@ -121,7 +123,6 @@ public final class RiverEdge
             edge.sourceEdge = true;
         }
     }
-}
 
     private static int waterflowToWidth(float waterflow) {
         return Math.max(
@@ -142,3 +143,4 @@ public final class RiverEdge
     private double getLength() {
         return RiverHelpers.distanceVertex(source, drain);
     }
+}
