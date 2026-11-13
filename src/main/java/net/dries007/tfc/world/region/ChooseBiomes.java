@@ -386,11 +386,12 @@ public enum ChooseBiomes implements RegionTask
             {
                 point.biome = TFCLayers.lakeFor(point.biome);
             }
-        }
 
-         if (point.endorheicLake() && point.rainfall < minRainForLowFreshWaterBiomes) {
+            if (point.endorheicLake() && point.rainfall < minRainForLowFreshWaterBiomes)
+            {
                 point.biome = SALT_FLATS;
-         }
+            }
+        }
     }
 
     private int getHotSpotBiome(int age)
