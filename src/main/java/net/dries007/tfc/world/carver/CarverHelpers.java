@@ -24,6 +24,8 @@ import org.jetbrains.annotations.Nullable;
 
 import net.dries007.tfc.common.blocks.soil.IDirtBlock;
 import net.dries007.tfc.util.Helpers;
+import net.dries007.tfc.world.TFCChunkGenerator;
+import net.dries007.tfc.world.chunkdata.ChunkData;
 
 public final class CarverHelpers
 {
@@ -31,39 +33,45 @@ public final class CarverHelpers
     public static final FluidState WATER = Fluids.WATER.defaultFluidState();
     public static final FluidState LAVA = Fluids.LAVA.defaultFluidState();
 
-    private static boolean touchesOrUnderliesFluid(ChunkAccess chunk, BlockPos pos, BlockPos.MutableBlockPos checkPos)
+    private static boolean isProtectedWaterBed(ChunkAccess chunk, BlockPos pos)
     {
-        final int x = pos.getX();
-        final int y = pos.getY();
-        final int z = pos.getZ();
-        final int maxY = chunk.getMaxBuildHeight() - 1;
-
-        for (int dy = 1; dy <= 4 && y + dy <= maxY; dy++)
+        // Use immutable pre-carver surface heights instead of chunk.getFluidState() so
+        // underground water/lava placed by the carver itself never causes a checkerboard skip pattern.
+        final ChunkData data = ChunkData.get(chunk);
+        if (data.status() != ChunkData.Status.FULL)
         {
-            checkPos.set(x, y + dy, z);
-            if (!chunk.getFluidState(checkPos).isEmpty())
-            {
-                return true;
-            }
+            return false;
+        }
+        final int[] surfaceHeights = data.getRockData().getSurfaceHeight();
+        final int localX = pos.getX() & 15;
+        final int localZ = pos.getZ() & 15;
+        final int y = pos.getY();
+
+        final int bedY = surfaceHeights[localX + 16 * localZ];
+        if (bedY < TFCChunkGenerator.SEA_LEVEL_Y && y >= bedY - 6)
+        {
+            return true;
         }
 
-        final int minChunkX = chunk.getPos().getMinBlockX();
-        final int maxChunkX = chunk.getPos().getMaxBlockX();
-        final int minChunkZ = chunk.getPos().getMinBlockZ();
-        final int maxChunkZ = chunk.getPos().getMaxBlockZ();
-
-        if (x > minChunkX && !chunk.getFluidState(checkPos.set(x - 1, y, z)).isEmpty()) return true;
-        if (x < maxChunkX && !chunk.getFluidState(checkPos.set(x + 1, y, z)).isEmpty()) return true;
-        if (z > minChunkZ && !chunk.getFluidState(checkPos.set(x, y, z - 1)).isEmpty()) return true;
-        if (z < maxChunkZ && !chunk.getFluidState(checkPos.set(x, y, z + 1)).isEmpty()) return true;
-
+        if (y < TFCChunkGenerator.SEA_LEVEL_Y)
+        {
+            if (localX > 0 && isBankAdjacentToWater(surfaceHeights[(localX - 1) + 16 * localZ], y)) return true;
+            if (localX < 15 && isBankAdjacentToWater(surfaceHeights[(localX + 1) + 16 * localZ], y)) return true;
+            if (localZ > 0 && isBankAdjacentToWater(surfaceHeights[localX + 16 * (localZ - 1)], y)) return true;
+            if (localZ < 15 && isBankAdjacentToWater(surfaceHeights[localX + 16 * (localZ + 1)], y)) return true;
+        }
         return false;
+    }
+
+    private static boolean isBankAdjacentToWater(int neighborBedY, int y)
+    {
+        return neighborBedY < TFCChunkGenerator.SEA_LEVEL_Y && y >= neighborBedY - 4;
     }
 
     public static <C extends CarverConfiguration> boolean carveBlock(CarvingContext context, C config, ChunkAccess chunk, BlockPos.MutableBlockPos pos, BlockPos.MutableBlockPos checkPos, Aquifer aquifer, MutableBoolean reachedSurface, BiPredicate<C, BlockState> canReplaceBlock)
     {
         final BlockState stateAt = chunk.getBlockState(pos);
-        if (!stateAt.getFluidState().isEmpty() || touchesOrUnderliesFluid(chunk, pos, checkPos))
+        if (!stateAt.getFluidState().isEmpty() || isProtectedWaterBed(chunk, pos))
         {
             return false;
         }

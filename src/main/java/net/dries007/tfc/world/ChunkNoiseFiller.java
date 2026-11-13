@@ -555,7 +555,7 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
     private double calculateNoiseAtHeight(int y, double heightNoiseValue, int surfaceIntegrityDepth)
     {
         final RiverInfo info = riverData[localX + 16 * localZ];
-        if (info != null && heightNoiseValue < seaLevel && y > heightNoiseValue)
+        if (info != null && info.normDistSq() <= 3.5 && heightNoiseValue < seaLevel && y > heightNoiseValue)
         {
             // Force complete carving above the riverbed in surface river channels regardless of biome/volcano weights
             return -1;
@@ -633,7 +633,7 @@ public class ChunkNoiseFiller extends ChunkHeightFiller
         final int localIndex = localX + 16 * localZ;
         final RiverInfo info = riverData[localIndex];
         final int bedHeight = surfaceHeight[localIndex];
-        final boolean inRiverChannel = info != null && bedHeight < seaLevel;
+        final boolean inRiverChannel = info != null && info.normDistSq() <= 3.5 && bedHeight < seaLevel;
 
         if (inRiverChannel && y > bedHeight)
         {
